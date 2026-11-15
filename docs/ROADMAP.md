@@ -3,7 +3,7 @@
 ## Phase 1 – Öffentliches Fundament
 - [x] Öffentliches Repository anlegen
 - [x] Initiale README veröffentlichen
-- [ ] Methodik und Fallstudie im PR prüfen und integrieren
+- [x] Initiale Methodik und öffentliche Kurzfassungen der Fallstudien mit [PR #9](https://github.com/Snahdul/HaMi-AI-Engineering/pull/9) geprüft und integriert (15.11.2026)
 - [x] Acht Issues und ein öffentliches GitHub Project mit Review-Board einrichten
 - [ ] Lizenzentscheidung treffen
 
