@@ -1,0 +1,24 @@
+# IDEs
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# .NET build output
+**/bin/
+**/obj/
+**/TestResults/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+appsettings.Development.json
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Logs
+*.log
