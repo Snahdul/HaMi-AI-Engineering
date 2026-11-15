@@ -42,8 +42,6 @@ Dokumentation, Erkenntnisse, Issue-Abschluss
 | Roadmap | [Roadmap](docs/ROADMAP.md) |
 | Geplante .NET-Demo | [Demo](demo/README.md) |
 
-Die ergänzenden Dokumente werden im ersten Änderungspaket bereitgestellt.
-
 ## Transparenz
 
 Dieses Repository ist eine **kuratierte öffentliche Darstellung** der Arbeitsweise, kein vollständiger Export privater Projekte oder Chats. Private Quelltexte, Zugangsdaten, personenbezogene Daten und echte Infrastrukturtopologien werden nicht übernommen.
