@@ -4,7 +4,7 @@
 - [x] Öffentliches Repository anlegen
 - [x] Initiale README veröffentlichen
 - [ ] Methodik und Fallstudie im PR prüfen und integrieren
-- [ ] Issues und GitHub Project einrichten
+- [x] Acht Issues und ein öffentliches GitHub Project mit Review-Board einrichten
 - [ ] Lizenzentscheidung treffen
 
 ## Phase 2 – Nachvollziehbare Fallstudien
