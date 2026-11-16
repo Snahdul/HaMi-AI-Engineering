@@ -138,18 +138,62 @@ jobs:
               '.data.user.projectV2.fields.nodes[] | select(.name == "Status") |
                .options[] | select(.name == $status) | .id' <<< "$project")"
 
-            for attempt in $(seq 1 "$retries"); do
+            # A PR signal should not spend a minute waiting for GitHub's
+            # asynchronous Auto-add. Issues retain their existing retry policy.
+            local max_attempts="$retries"
+            if [ "${4:-}" = "pr-scheduled" ] && [ "$max_attempts" -gt 3 ]; then
+              max_attempts=3
+            fi
+            for attempt in $(seq 1 "$max_attempts"); do
               entry="$(find_item "$node_id" || true)"
               if [ -n "$entry" ]; then
                 item_id="$(cut -f 1 <<< "$entry")"
                 prior="$(cut -f 2 <<< "$entry")"
                 if [ -n "$prior" ]; then break; fi
               fi
-              sleep 3
+              if [ "$attempt" -lt "$max_attempts" ]; then sleep 3; fi
             done
+
             if [ -z "$item_id" ] || [ -z "$prior" ]; then
-              echo "::warning::Project entry/initial status not available: $node_id"
-              return 1
+              if [ "${4:-}" != "pr-scheduled" ]; then
+                echo "::warning::Project entry/initial status not available: $node_id"
+                return 1
+              fi
+
+              # The project Auto-add timeline and GraphQL item list can disagree.
+              # GitHub documents addProjectV2ItemById as idempotent: an existing
+              # item is returned, never duplicated. Only internal PRs reach here.
+              echo "::notice::Resolving PR Project item via idempotent GitHub mutation: $node_id"
+              item_id="$(gh api graphql \
+                -f query='mutation($project: ID!, $content: ID!) {
+                  addProjectV2ItemById(input: {
+                    projectId: $project
+                    contentId: $content
+                  }) { item { id } }
+                }' \
+                -f project="$project_id" -f content="$node_id" \
+                --jq '.data.addProjectV2ItemById.item.id')"
+              if [ -z "$item_id" ] || [ "$item_id" = "null" ]; then
+                echo "::error::Could not resolve a Project item for PR $node_id"
+                return 1
+              fi
+
+              # Read current field directly from the returned Project item so
+              # an existing human Done decision remains protected.
+              prior="$(gh api graphql \
+                -f query='query($item: ID!) {
+                  node(id: $item) {
+                    ... on ProjectV2Item {
+                      fieldValueByName(name: "Status") {
+                        ... on ProjectV2ItemFieldSingleSelectValue { name }
+                      }
+                    }
+                  }
+                }' -f item="$item_id" \
+                --jq '.data.node.fieldValueByName.name // ""')"
+              if [ -z "$prior" ]; then
+                prior="(unset)"
+              fi
             fi
             # Do not reactivate a merged/completed PR. An unmerged closure
             # may correct a previously incorrect Done to Cancelled.

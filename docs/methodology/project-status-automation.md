@@ -34,9 +34,19 @@ Das Ergebnis ist ereignisgetrieben: **kein festes 15-Minuten-Wartefenster**. Git
 
 ## Voraussetzung: fünfter Project-Statuswert
 
-Vor der Übernahme des Cancelled-Folge-PRs muss im [GitHub Project #1](https://github.com/users/Snahdul/projects/1) das bestehende Single-Select-Feld **`Status`** um die zusätzliche Option **`Cancelled`** (exakte Groß-/Kleinschreibung) ergänzt werden. Pfad: **Project → Settings → Fields → Status → Add option → Cancelled → Save**. Die bestehenden vier Optionen bleiben unverändert. Ein GitHub-Repository-Connector kann diese ProjectV2-Feldkonfiguration nicht direkt ändern.
+Am 16.11.2026 hat der Repositoryinhaber im [GitHub Project #1](https://github.com/users/Snahdul/projects/1) die Option **`Cancelled`** (exakte Schreibweise) im Single-Select-Feld **`Status`** ergänzt und alle bestehenden Optionen beibehalten. Die Einstellung wurde per Screenshot kontrolliert. [PR #19](https://github.com/Snahdul/HaMi-AI-Engineering/pull/19) wurde nach ausdrücklicher menschlicher Freigabe in `main` gemergt (Commit `fe3135cd`).
 
-Die privilegierte Action validiert die vorhandene Option vor jedem Statusabgleich und beendet den Lauf **mit einem expliziten Fehler**, wenn `Cancelled` fehlt. Das verhindert stille Fehlklassifikationen. Erst danach darf der Code gemergt und live getestet werden.
+Die privilegierte Action validiert die Option bei jedem Statusabgleich und meldet einen **expliziten Fehler**, falls sie fehlt. Der nun fehlgeschlagene Live-Test bei PR #20 kam **erst nach** dieser Prüfung bis zur Projekt-Item-Auflösung; Ursache und geplanter Fallback sind nachstehend dokumentiert.
+
+## Resilienz bei verspäteten oder fehlenden Project-Einträgen
+
+Beim Live-Test von [PR #20](https://github.com/Snahdul/HaMi-AI-Engineering/pull/20) (16.11.2026) waren die `pull_request`-Signale für `opened`, `closed` und `reopened` erfolgreich. Die geschützten Folgeläufe konnten den zugehörigen ProjectV2-Eintrag jedoch nicht über die bestehende `projectV2.items`-Suche mit initialem Status auflösen und brachen jeweils nach mehreren Versuchen ab. Die PR-Timeline protokollierte zugleich `added_to_project_v2` und einen initialen Statuswechsel. **Welche Ebene die Diskrepanz verursacht hat, ist noch ungeklärt.**
+
+Der geschützte Workflow soll deshalb nach drei begrenzten Leserversuchen bei **internen PRs** das Project-Item über `addProjectV2ItemById(projectId, contentId)` auflösen. Diese GitHub-GraphQL-Mutation ist laut [offizieller GitHub-Dokumentation](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects) **idempotent**: Ist der Eintrag bereits vorhanden, liefert die API seine bestehende Item-ID zurück. Erst nach dieser gesicherten Zuordnung wird der aktuelle Status direkt am Item nachgelesen und gegebenenfalls aktualisiert. Ein bestehendes `Done` wird bei einem weiterhin offenen PR unverändert respektiert.
+
+Für Issues bleibt die ursprüngliche rein lesende Suche unverändert. Die Secret-freie PR-Signalstufe führt weiterhin keinerlei Project-Schreibzugriff aus. Ein Merge oder eine Änderung an fremden Repository-PRs wird dadurch nicht ausgelöst.
+
+**Abnahmestand:** Der Resilienz-Fallback ist als Korrektur vorgeschlagen und strukturell geprüft, **noch nicht produktiv getestet**. Die konkrete Statusmutation `Review → Cancelled` ist für PR #20 bisher nicht bestätigt. Der Live-Test wird erst nach menschlicher Freigabe und Merge der Korrektur erneut durchgeführt; Details in [Issue #18](https://github.com/Snahdul/HaMi-AI-Engineering/issues/18).
 
 ## Sicherheitsarchitektur
 
