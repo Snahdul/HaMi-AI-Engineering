@@ -15,7 +15,7 @@ GitHub Projects ist die führende Quelle für den sichtbaren Arbeitsstatus, GitH
 | Neues Item im Projekt | Todo | GitHub Projects, integrierter Workflow `Item added` |
 | Aktive Bearbeitung eines Issues | In Progress | Label `workflow:in-progress` → GitHub Action |
 | Issue bereit für fachliches Review | Review | Label `workflow:review` → GitHub Action |
-| Offener PR im Draft-Zustand | In Progress | GitHub Action, spätestens beim regelmäßigen Abgleich |
+| Offener PR im Draft-Zustand | In Progress, sofern nicht bewusst auf Review | GitHub Action, spätestens beim regelmäßigen Abgleich |
 | Offener PR ohne Draft-Status | Review | GitHub Action, spätestens beim regelmäßigen Abgleich |
 | Geschlossenes Issue | Done | GitHub Projects, integrierter Workflow `Item closed` (nur Issues) |
 | Gemergter PR | Done | GitHub Projects, integrierter Workflow `Pull request merged` |
@@ -30,7 +30,7 @@ Stattdessen läuft die Action über drei **vertrauenswürdige** Ereignisse:
 - `schedule`: Alle 15 Minuten wird der **aktuelle** Zustand offener, aus dem eigenen Repository stammender PRs und markierter Issues geprüft. Die GitHub-Ausführung kann sich verzögern; es gibt keine exakte Echtzeitgarantie.
 - `workflow_dispatch`: Bei Bedarf kann der Repositoryinhaber einen konkreten Issue/PR und Zielstatus manuell angeben.
 
-Die Synchronisierung erstellt **keine** neuen Projektkarten. Sie wartet darauf, dass `Auto-add` und `Item added → Todo` die Karte und den initialen Status eingerichtet haben. Bei einem geplanten Lauf wird ein noch fehlender Eintrag protokolliert und beim nächsten Lauf erneut berücksichtigt. Bei einer direkten Label- oder manuellen Ausführung werden mehrere Versuche vorgenommen.
+Eine **manuell vergebene Review-Entscheidung bleibt erhalten**, selbst wenn der offene PR noch als Draft markiert ist. Ebenso wird ein `Done`-Eintrag nicht wieder aktiviert. Die Synchronisierung erstellt **keine** neuen Projektkarten. Sie wartet darauf, dass `Auto-add` und `Item added → Todo` die Karte und den initialen Status eingerichtet haben. Bei einem geplanten Lauf wird ein noch fehlender Eintrag protokolliert und beim nächsten Lauf erneut berücksichtigt. Bei einer direkten Label- oder manuellen Ausführung werden mehrere Versuche vorgenommen.
 
 ## Bereits bestätigte Konfiguration
 
@@ -66,7 +66,7 @@ Die technische GitHub-Integration konnte das Label `workflow:in-progress` bereit
 2. In `Actions → HaMi GitHub Project status → Run workflow` den abgeschlossenen Issue **#2** explizit auf `Done` synchronisieren; Laufprotokoll und GitHub-Project-Board kontrollieren.
 3. Bei einem aktiven Issue `workflow:in-progress` hinzufügen und nach einem Action-Lauf `In Progress` kontrollieren.
 4. Danach das Label wechseln zu `workflow:review` und `Review` kontrollieren.
-5. Einen neuen internen Draft-PR auf dem Board beobachten; nach der ersten geplanten Synchronisierung muss er `In Progress` erreichen. Nach `ready for review` muss die nächste Synchronisierung `Review` setzen.
+5. Einen neuen internen Draft-PR auf dem Board beobachten; nach der ersten geplanten Synchronisierung muss ein bisheriges `Todo` in `In Progress` wechseln. Ein manuell auf `Review` gesetzter Draft-PR (z. B. #12/#13) darf nicht zurückgestuft werden. Nach `ready for review` muss die nächste Synchronisierung `Review` setzen.
 6. PR-Merge und Issue-Abschluss mit den integrierten `Done`-Workflows prüfen.
 7. Fehlerbehandlung, Token-Rotation und Testergebnisse in [Issue #10](https://github.com/Snahdul/HaMi-AI-Engineering/issues/10) dokumentieren.
 
