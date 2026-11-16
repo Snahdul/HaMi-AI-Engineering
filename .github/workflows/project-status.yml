@@ -1,10 +1,11 @@
 name: HaMi GitHub Project status
 
 on:
-  pull_request_target:
-    types: [opened, reopened, converted_to_draft, ready_for_review]
   issues:
     types: [labeled]
+  schedule:
+    # Periodically reconcile PRs. Only base-branch code gets the project secret.
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       kind:
@@ -22,23 +23,15 @@ on:
         options: [Todo, In Progress, Review, Done]
         required: true
 
-# Project token is a GitHub Secret. This workflow runs trusted base-branch code.
-# Never check out or execute any PR code in this privileged workflow.
+# No pull_request_target or pull_request trigger, and no checkout of PR code.
 permissions: {}
-
-concurrency:
-  group: project-status-${{ github.event.pull_request.number || github.event.issue.number || inputs.number || github.run_id }}
-  cancel-in-progress: true
 
 jobs:
   sync:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request_target' &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'issues' &&
-       (github.event.label.name == 'workflow:in-progress' ||
-        github.event.label.name == 'workflow:review'))
+      github.event_name != 'issues' ||
+      (github.event.label.name == 'workflow:in-progress' ||
+       github.event.label.name == 'workflow:review')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -47,180 +40,180 @@ jobs:
       PROJECT_NUMBER: ${{ vars.HAMI_PROJECT_NUMBER }}
       REPOSITORY: ${{ github.repository }}
       EVENT_NAME: ${{ github.event_name }}
-      EVENT_ACTION: ${{ github.event.action }}
-      PR_NODE_ID: ${{ github.event.pull_request.node_id }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-      ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
-      LABEL_NAME: ${{ github.event.label.name }}
       INPUT_KIND: ${{ inputs.kind }}
       INPUT_NUMBER: ${{ inputs.number }}
       INPUT_STATUS: ${{ inputs.status }}
     steps:
-      - name: Set the GitHub Project status
+      - name: Synchronize GitHub Project status
         shell: bash
         run: |
           set -euo pipefail
 
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error::Missing repository secret HAMI_PROJECT_TOKEN"
-            exit 1
+            echo "::error::Missing secret HAMI_PROJECT_TOKEN"; exit 1
           fi
           if ! [[ "$PROJECT_NUMBER" =~ ^[0-9]+$ ]]; then
-            echo "::error::Missing or invalid repository variable HAMI_PROJECT_NUMBER"
-            exit 1
+            echo "::error::Missing or invalid variable HAMI_PROJECT_NUMBER"; exit 1
           fi
 
-          case "$EVENT_NAME" in
-            pull_request_target)
-              content_id="$PR_NODE_ID"
-              case "$EVENT_ACTION" in
-                opened|reopened|converted_to_draft) status="In Progress" ;;
-                ready_for_review) status="Review" ;;
-                *) echo "::error::Unexpected PR event"; exit 1 ;;
-              esac
-              ;;
-            issues)
-              content_id="$ISSUE_NODE_ID"
-              case "$LABEL_NAME" in
-                workflow:in-progress) status="In Progress" ;;
-                workflow:review) status="Review" ;;
-                *) echo "::error::Unexpected label"; exit 1 ;;
-              esac
-              ;;
-            workflow_dispatch)
-              status="$INPUT_STATUS"
-              case "$INPUT_KIND" in
-                issue) item_path="issues/$INPUT_NUMBER" ;;
-                pull_request) item_path="pulls/$INPUT_NUMBER" ;;
-                *) echo "::error::Invalid item type"; exit 1 ;;
-              esac
-              # This repository is public. No untrusted event text is evaluated.
-              content_id="$(gh api "repos/$REPOSITORY/$item_path" --jq '.node_id')"
-              ;;
-            *)
-              echo "::error::Unexpected workflow event"; exit 1
-              ;;
-          esac
-
-          test -n "$content_id" || { echo "::error::Missing GitHub node ID"; exit 1; }
-
-          project_json="$(gh api graphql \
-            -f query='
-              query($owner: String!, $number: Int!) {
-                user(login: $owner) {
-                  projectV2(number: $number) {
-                    id
-                    fields(first: 50) {
-                      nodes {
-                        ... on ProjectV2SingleSelectField {
-                          id
-                          name
-                          options { id name }
-                        }
+          project="$(gh api graphql \
+            -f query='query($owner: String!, $number: Int!) {
+              user(login: $owner) {
+                projectV2(number: $number) {
+                  id
+                  fields(first: 50) {
+                    nodes {
+                      ... on ProjectV2SingleSelectField {
+                        id name options { id name }
                       }
                     }
                   }
                 }
-              }' \
+              }
+            }' \
             -f owner="$PROJECT_OWNER" -F number="$PROJECT_NUMBER")"
+          project_id="$(jq -er '.data.user.projectV2.id' <<< "$project")"
+          field_id="$(jq -er '.data.user.projectV2.fields.nodes[] | select(.name == "Status") | .id' <<< "$project")"
 
-          project_id="$(jq -er '.data.user.projectV2.id' <<< "$project_json")"
-          field_id="$(jq -er '.data.user.projectV2.fields.nodes[] | select(.name == "Status") | .id' <<< "$project_json")"
-          option_id="$(jq -er --arg desired "$status" \
-            '.data.user.projectV2.fields.nodes[] | select(.name == "Status") | .options[] | select(.name == $desired) | .id' \
-            <<< "$project_json")"
-
-          # GitHub's built-in Auto-add / Item added rule sets Todo asynchronously.
-          # Never add a project item from this job: wait for the built-in rule.
-          lookup_project_item() {
-            local cursor="" response match has_next
+          # Read existing project entries; the built-in workflows own Auto-add/Todo.
+          find_item() {
+            local wanted="$1" cursor="" result entry more
             while :; do
-              local args=(-f query='
-                query($project: ID!, $after: String) {
-                  node(id: $project) {
-                    ... on ProjectV2 {
-                      items(first: 100, after: $after) {
-                        nodes {
-                          id
-                          content {
-                            ... on Issue { id }
-                            ... on PullRequest { id }
-                          }
-                          fieldValueByName(name: "Status") {
-                            ... on ProjectV2ItemFieldSingleSelectValue { name }
-                          }
+              local args=(-f query='query($project: ID!, $after: String) {
+                node(id: $project) {
+                  ... on ProjectV2 {
+                    items(first: 100, after: $after) {
+                      nodes {
+                        id
+                        content {
+                          ... on Issue { id }
+                          ... on PullRequest { id }
                         }
-                        pageInfo { hasNextPage endCursor }
+                        fieldValueByName(name: "Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
                       }
+                      pageInfo { hasNextPage endCursor }
                     }
                   }
-                }' -f project="$project_id")
+                }
+              }' -f project="$project_id")
               if [ -n "$cursor" ]; then args+=(-f after="$cursor"); fi
-              response="$(gh api graphql "${args[@]}")"
-              match="$(jq -r --arg content "$content_id" \
-                '.data.node.items.nodes[] | select(.content.id == $content) |
-                 [.id, (.fieldValueByName.name // "")] | @tsv' <<< "$response")"
-              if [ -n "$match" ]; then
-                printf '%s\n' "$match"
-                return 0
-              fi
-              has_next="$(jq -r '.data.node.items.pageInfo.hasNextPage' <<< "$response")"
-              if [ "$has_next" != "true" ]; then return 1; fi
-              cursor="$(jq -er '.data.node.items.pageInfo.endCursor' <<< "$response")"
+              result="$(gh api graphql "${args[@]}")"
+              entry="$(jq -r --arg id "$wanted" \
+                '.data.node.items.nodes[] | select(.content.id == $id) |
+                 [.id, (.fieldValueByName.name // "")] | @tsv' <<< "$result")"
+              if [ -n "$entry" ]; then printf '%s\n' "$entry"; return 0; fi
+              more="$(jq -r '.data.node.items.pageInfo.hasNextPage' <<< "$result")"
+              if [ "$more" != "true" ]; then return 1; fi
+              cursor="$(jq -er '.data.node.items.pageInfo.endCursor' <<< "$result")"
             done
           }
 
-          item_id=""
-          current_status=""
-          for attempt in $(seq 1 30); do
-            lookup="$(lookup_project_item || true)"
-            if [ -n "$lookup" ]; then
-              item_id="$(cut -f 1 <<< "$lookup")"
-              current_status="$(cut -f 2 <<< "$lookup")"
-              if [ -n "$current_status" ]; then break; fi
+          sync_one() {
+            local node_id="$1" desired="$2" retries="$3"
+            local entry="" item_id="" prior="" option="" attempt
+            option="$(jq -er --arg status "$desired" \
+              '.data.user.projectV2.fields.nodes[] | select(.name == "Status") |
+               .options[] | select(.name == $status) | .id' <<< "$project")"
+
+            for attempt in $(seq 1 "$retries"); do
+              entry="$(find_item "$node_id" || true)"
+              if [ -n "$entry" ]; then
+                item_id="$(cut -f 1 <<< "$entry")"
+                prior="$(cut -f 2 <<< "$entry")"
+                if [ -n "$prior" ]; then break; fi
+              fi
+              sleep 3
+            done
+            if [ -z "$item_id" ] || [ -z "$prior" ]; then
+              echo "::warning::Project entry/initial status not available: $node_id"
+              return 1
             fi
-            sleep 3
-          done
-          if [ -z "$item_id" ] || [ -z "$current_status" ]; then
-            echo "::error::Project item/initial Status not ready after 90 seconds; retry via workflow_dispatch."
-            exit 1
-          fi
+            if [ "$prior" = "$desired" ]; then
+              echo "$node_id: already $desired"; return 0
+            fi
 
-          # Late PR/issue events must never undo a later close or merge.
-          case "$EVENT_NAME" in
-            pull_request_target)
-              merged_or_closed="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" \
-                --jq '(.merged_at != null) or (.state == "closed")')"
-              if [ "$merged_or_closed" = "true" ]; then
-                echo "PR already closed/merged; leaving Done to GitHub's built-in rule."
-                exit 0
-              fi
-              ;;
-            issues)
-              issue_state="$(gh api "repos/$REPOSITORY/issues/$ISSUE_NUMBER" --jq '.state')"
-              if [ "$issue_state" != "open" ]; then
-                echo "Issue already closed; leaving Done to GitHub's built-in rule."
-                exit 0
-              fi
-              ;;
-          esac
-
-          gh api graphql \
-            -f query='
-              mutation($project: ID!, $item: ID!, $field: ID!, $choice: String!) {
+            gh api graphql \
+              -f query='mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
                 updateProjectV2ItemFieldValue(input: {
                   projectId: $project
                   itemId: $item
                   fieldId: $field
-                  value: { singleSelectOptionId: $choice }
-                }) {
-                  projectV2Item { id }
-                }
+                  value: { singleSelectOptionId: $option }
+                }) { projectV2Item { id } }
               }' \
-            -f project="$project_id" -f item="$item_id" \
-            -f field="$field_id" -f choice="$option_id" \
-            --jq '.data.updateProjectV2ItemFieldValue.projectV2Item.id' > /dev/null
+              -f project="$project_id" -f item="$item_id" \
+              -f field="$field_id" -f option="$option" \
+              --jq '.data.updateProjectV2ItemFieldValue.projectV2Item.id' >/dev/null
 
-          echo "Project status set to: $status"
-          echo "Status: **$status**" >> "$GITHUB_STEP_SUMMARY"
+            echo "$node_id: $prior → $desired"
+            echo "**$node_id:** $prior → $desired" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          # Work against the current state to avoid stale event transitions.
+          sync_issue() {
+            local number="$1" issue labels target
+            issue="$(gh api "repos/$REPOSITORY/issues/$number")"
+            if [ "$(jq -r '.state' <<< "$issue")" != "open" ]; then return 0; fi
+            labels="$(jq -c '[.labels[].name]' <<< "$issue")"
+            if jq -e 'index("workflow:review") != null' <<< "$labels" >/dev/null; then
+              target="Review"
+            elif jq -e 'index("workflow:in-progress") != null' <<< "$labels" >/dev/null; then
+              target="In Progress"
+            else
+              return 0
+            fi
+            sync_one "$(jq -er '.node_id' <<< "$issue")" "$target" 20
+          }
+
+          case "$EVENT_NAME" in
+            issues)
+              sync_issue "$ISSUE_NUMBER"
+              ;;
+            workflow_dispatch)
+              case "$INPUT_KIND" in
+                issue) endpoint="issues/$INPUT_NUMBER" ;;
+                pull_request) endpoint="pulls/$INPUT_NUMBER" ;;
+                *) echo "::error::Invalid item type"; exit 1 ;;
+              esac
+              item="$(gh api "repos/$REPOSITORY/$endpoint")"
+              if [ "$(jq -r '.state' <<< "$item")" != "open" ] &&
+                 [ "$INPUT_STATUS" != "Done" ]; then
+                echo "::error::Cannot reactivate a closed item"; exit 1
+              fi
+              sync_one "$(jq -er '.node_id' <<< "$item")" "$INPUT_STATUS" 20
+              ;;
+            schedule)
+              # PRs: draft = In Progress, ready for review = Review.
+              # Only PRs whose head repository is this repository are handled.
+              while IFS=$'\t' read -r number node_id origin; do
+                [ -n "$number" ] || continue
+                [ "$origin" = "$REPOSITORY" ] || continue
+                pr="$(gh api "repos/$REPOSITORY/pulls/$number")"
+                [ "$(jq -r '.state' <<< "$pr")" = "open" ] || continue
+                if [ "$(jq -r '.draft' <<< "$pr")" = "true" ]; then
+                  sync_one "$node_id" "In Progress" 2 || true
+                else
+                  sync_one "$node_id" "Review" 2 || true
+                fi
+              done < <(gh api "repos/$REPOSITORY/pulls?state=open&per_page=100" \
+                --paginate --jq '.[] | [.number, .node_id, (.head.repo.full_name // "")] | @tsv')
+
+              # Repair any missed issue label events as well.
+              while IFS=$'\t' read -r number; do
+                [ -n "$number" ] || continue
+                sync_issue "$number" || true
+              done < <(gh api "repos/$REPOSITORY/issues?state=open&per_page=100" \
+                --paginate --jq '
+                  .[] | select(.pull_request == null) |
+                  ([.labels[].name] as $labels |
+                    select(($labels | index("workflow:review")) != null or
+                           ($labels | index("workflow:in-progress")) != null)) |
+                  .number')
+              ;;
+            *)
+              echo "::error::Unsupported event"; exit 1
+              ;;
+          esac
