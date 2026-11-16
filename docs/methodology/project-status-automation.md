@@ -1,6 +1,6 @@
 # GitHub-Project-Statusautomatisierung
 
-**Aktueller Stand:** Der Basis-Workflow aus [PR #14](https://github.com/Snahdul/HaMi-AI-Engineering/pull/14) und die Standardregel `offener PR → Review` aus [PR #15](https://github.com/Snahdul/HaMi-AI-Engineering/pull/15) sind in `main`. Die ereignisgesteuerte PR-Synchronisierung wird separat im Folge-PR vorbereitet und ist bis zu dessen Freigabe und Merge **nicht aktiv**. Nachweise und verbleibende Arbeiten stehen in [Issue #10](https://github.com/Snahdul/HaMi-AI-Engineering/issues/10).
+**Aktueller Stand (16.11.2026):** Basis-Workflow [PR #14](https://github.com/Snahdul/HaMi-AI-Engineering/pull/14), Review-Regel [PR #15](https://github.com/Snahdul/HaMi-AI-Engineering/pull/15) und zweistufiger PR-Trigger [PR #16](https://github.com/Snahdul/HaMi-AI-Engineering/pull/16) sind in `main`. Die Statusänderung von Issues und der periodische PR-Abgleich sind durch erfolgreiche Actions-Läufe belegt. **Der ereignisgesteuerte Statuswechsel eines offenen PRs ist jetzt durch drei vollständige Actions-Paare und echte ProjectV2-Mutationen nachgewiesen**, siehe Testprotokoll zu PR #17 unten. Nachweise und offene Arbeiten stehen in [Issue #10](https://github.com/Snahdul/HaMi-AI-Engineering/issues/10).
 
 ## Statusmodell
 
@@ -48,16 +48,23 @@ Die ursprüngliche PR-Statusautomatisierung [#14](https://github.com/Snahdul/HaM
 - [Run #6](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43874900326): tatsächliche Mutation `In Progress → Review`.
 - [Run #7](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43874977190): tatsächliche Mutation `Review → In Progress`.
 
-Die neuen Ereignistrigger selbst sind **noch nicht live getestet**.
+Die neue Signalkette wurde in [Run #43879352888](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43879352888) und [Run #43879383218](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43879383218) **beide Male erfolgreich ausgeführt**. Der betroffene PR #16 war beim geschützten Folge-Lauf bereits gemergt; damit ist noch **keine PR-Statusmutation** durch die neue Kette nachgewiesen. Der frühere [geplante Lauf #43878014136](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43878014136) hat PR #12 und #13 nachweislich auf `Review` gesetzt.
 
-## Abnahmeplan für den Folge-PR
+**Nachtest älterer PR-Branches:** An PR #12 löste das Entfernen und erneute Setzen von `workflow:review` im GitHub-Web-UI keinen neuen Signal-Lauf aus. Die Workflow-Datei fehlt im Head- und synthetischen Merge-Commit von PR #12/#13, weil ihre PR-Branchstände vor PR #16 liegen. Dies wurde am 16.11.2026 anhand der GitHub-Refs festgestellt. Ein neuer PR aus aktuellem `main` dient deshalb als isolierter End-to-End-Test.
 
-1. Beide Workflow-Dateien und ihre Sicherheit prüfen. Keine GitHub-Workflows aktivieren, bevor die menschliche PR-Freigabe erfolgt.
-2. Folge-PR nach ausdrücklicher Freigabe in `main` mergen. Erst dann kann der privilegierte Workflow auf den unprivilegierten PR-Signal-Workflow reagieren.
-3. An [PR #12](https://github.com/Snahdul/HaMi-AI-Engineering/pull/12) oder [PR #13](https://github.com/Snahdul/HaMi-AI-Engineering/pull/13) ein `pull_request:labeled`-Ereignis auslösen, etwa indem `workflow:review` entfernt und erneut hinzugefügt wird.
-4. Kontrollieren: Ein **erfolgreicher Signal-Lauf ohne Secrets** startet anschließend einen **erfolgreichen `workflow_run`** im geschützten Workflow; dieser findet den richtigen Project-Eintrag mit Status `Review`.
-5. Zusätzlich an einem PR den Ausnahmefall `workflow:in-progress` testen, danach Label entfernen und den ursprünglichen Review-Status wiederherstellen.
-6. Optional abschließend die eingebauten `Done`-Automationen und den täglichen Wiederherstellungslauf prüfen; Ergebnisse und Token-Rotationsverfahren in [Issue #10](https://github.com/Snahdul/HaMi-AI-Engineering/issues/10) dokumentieren.
+## Erfolgreicher End-to-End-Test mit offenem PR #17 (16.11.2026)
+
+Der Dokumentations-[PR #17](https://github.com/Snahdul/HaMi-AI-Engineering/pull/17) wurde als **Draft** auf einem Branch aus aktuellem `main` eröffnet. Er blieb während aller drei Statuswechsel **offen**; die Aktionen wurden über GitHub-Events ausgelöst und nicht manuell über `workflow_dispatch`.
+
+| Auslöser | Signal-Workflow ohne Secret | Folge-Workflow mit Projekt-Secret | Im Job-Log bestätigte Mutation |
+| --- | --- | --- | --- |
+| `pull_request:opened` | [Run #43881762513](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43881762513) – success | [Run #43881792315](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43881792315) – success | `Todo → Review` |
+| Label `workflow:in-progress` gesetzt | [Run #43881902199](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43881902199) – success | [Run #43881926076](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43881926076) – success | `Review → In Progress` |
+| Label `workflow:in-progress` entfernt | [Run #43882056882](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43882056882) – success | [Run #43882100019](https://github.com/Snahdul/HaMi-AI-Engineering/actions/runs/43882100019) – success | `In Progress → Review` |
+
+**Bewertung:** Alle drei ausgelösten Signal-Workflows haben den geschützten `workflow_run` gestartet, und die Statusänderung wurde jeweils durch eine echte GraphQL-`updateProjectV2ItemFieldValue`-Mutation im Job protokolliert. Der Test belegt den Normalbetrieb **ohne festen 15-Minuten-Pollingzyklus**. GitHub-Actions-Queues können weiterhin Verzögerungen verursachen.
+
+**Noch offen:** Menschliche Dokumentations-/Mergefreigabe für PR #17, separate Prüfung des täglichen Wiederherstellungslaufs und der GitHub-Projects-`Done`-Automationen sowie Token-Ablauf/-Rotation in [Issue #10](https://github.com/Snahdul/HaMi-AI-Engineering/issues/10).
 
 **Die PR-Statusregeln lösen niemals eigenständig einen Merge aus; die fachliche und rechtliche Freigabe bleibt menschlich.**
 
