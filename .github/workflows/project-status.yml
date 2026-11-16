@@ -3,9 +3,12 @@ name: HaMi GitHub Project status
 on:
   issues:
     types: [labeled]
+  workflow_run:
+    workflows: ["HaMi PR status signal"]
+    types: [completed]
   schedule:
-    # Periodically reconcile PRs. Only base-branch code gets the project secret.
-    - cron: '*/15 * * * *'
+    # Fallback only. Pull request events are synchronized immediately.
+    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       kind:
@@ -23,15 +26,22 @@ on:
         options: [Todo, In Progress, Review, Done]
         required: true
 
-# No pull_request_target or pull_request trigger, and no checkout of PR code.
+# No privileged PR trigger. The secret is used only from the default branch,
+# after the unprivileged PR signal has completed. No PR code checkout.
 permissions: {}
 
 jobs:
   sync:
     if: >-
-      github.event_name != 'issues' ||
-      (github.event.label.name == 'workflow:in-progress' ||
-       github.event.label.name == 'workflow:review')
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'issues' &&
+       (github.event.label.name == 'workflow:in-progress' ||
+        github.event.label.name == 'workflow:review')) ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -41,6 +51,9 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       EVENT_NAME: ${{ github.event_name }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
+      SIGNAL_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+      SIGNAL_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      SIGNAL_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
       INPUT_KIND: ${{ inputs.kind }}
       INPUT_NUMBER: ${{ inputs.number }}
       INPUT_STATUS: ${{ inputs.status }}
@@ -173,7 +186,54 @@ jobs:
             sync_one "$(jq -er '.node_id' <<< "$issue")" "$target" "$retries"
           }
 
+          # Trusted base-branch code reads the CURRENT PR state.
+          # Never check out, evaluate or execute code or text from a pull request.
+          sync_pr() {
+            local number="$1" pr labels target origin
+            pr="$(gh api "repos/$REPOSITORY/pulls/$number")"
+            if [ "$(jq -r '.state' <<< "$pr")" != "open" ]; then return 0; fi
+            origin="$(jq -r '.head.repo.full_name // ""' <<< "$pr")"
+            if [ "$origin" != "$REPOSITORY" ]; then
+              echo "Ignoring PR from external repository"
+              return 0
+            fi
+            labels="$(jq -c '[.labels[].name]' <<< "$pr")"
+            if jq -e 'index("workflow:review") != null' <<< "$labels" >/dev/null; then
+              target="Review"
+            elif jq -e 'index("workflow:in-progress") != null' <<< "$labels" >/dev/null; then
+              target="In Progress"
+            else
+              target="Review"
+            fi
+            sync_one "$(jq -er '.node_id' <<< "$pr")" "$target" 20 pr-scheduled
+          }
+
           case "$EVENT_NAME" in
+            workflow_run)
+              if [ "$SIGNAL_HEAD_REPO" != "$REPOSITORY" ]; then
+                echo "Ignoring external workflow signal"
+                exit 0
+              fi
+              if [[ "$SIGNAL_PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+                sync_pr "$SIGNAL_PR_NUMBER"
+              else
+                # Some workflow_run payloads omit pull_requests. Match the
+                # current internal PR head branch using only GitHub API data.
+                candidates="$(gh api "repos/$REPOSITORY/pulls?state=open&per_page=100" \
+                  --paginate --jq '.[] | [.number, .head.ref, (.head.repo.full_name // "")] | @tsv')"
+                found=false
+                while IFS=$'\t' read -r number head_branch origin; do
+                  [ -n "$number" ] || continue
+                  if [ "$origin" = "$REPOSITORY" ] && [ "$head_branch" = "$SIGNAL_BRANCH" ]; then
+                    sync_pr "$number"
+                    found=true
+                  fi
+                done <<< "$candidates"
+                if [ "$found" != "true" ]; then
+                  echo "No open internal PR matches the event; it may already be closed"
+                fi
+              fi
+              ;;
             issues)
               sync_issue "$ISSUE_NUMBER"
               ;;
