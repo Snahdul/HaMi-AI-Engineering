@@ -1,0 +1,157 @@
+name: HaMi GitHub Project status
+
+on:
+  pull_request:
+    types: [opened, reopened, converted_to_draft, ready_for_review]
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "Issue or pull request in this repository"
+        type: choice
+        options: [issue, pull_request]
+        required: true
+      number:
+        description: "Issue/PR number"
+        type: number
+        required: true
+      status:
+        description: "Desired project status"
+        type: choice
+        options: [Todo, In Progress, Review, Done]
+        required: true
+
+# No repository write permissions are required. The project token
+# is provided only through a repository secret.
+permissions: {}
+
+jobs:
+  sync:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'issues' &&
+       (github.event.label.name == 'workflow:in-progress' ||
+        github.event.label.name == 'workflow:review'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.HAMI_PROJECT_TOKEN }}
+      PROJECT_OWNER: Snahdul
+      PROJECT_NUMBER: ${{ vars.HAMI_PROJECT_NUMBER }}
+      REPOSITORY: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
+      EVENT_ACTION: ${{ github.event.action }}
+      PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+      ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
+      LABEL_NAME: ${{ github.event.label.name }}
+      INPUT_KIND: ${{ inputs.kind }}
+      INPUT_NUMBER: ${{ inputs.number }}
+      INPUT_STATUS: ${{ inputs.status }}
+    steps:
+      - name: Set the GitHub Project status
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Missing repository secret HAMI_PROJECT_TOKEN"
+            exit 1
+          fi
+          if ! [[ "$PROJECT_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::Missing or invalid repository variable HAMI_PROJECT_NUMBER"
+            exit 1
+          fi
+
+          case "$EVENT_NAME" in
+            pull_request)
+              content_id="$PR_NODE_ID"
+              case "$EVENT_ACTION" in
+                opened|reopened|converted_to_draft) status="In Progress" ;;
+                ready_for_review) status="Review" ;;
+                *) echo "::error::Unexpected PR event"; exit 1 ;;
+              esac
+              ;;
+            issues)
+              content_id="$ISSUE_NODE_ID"
+              case "$LABEL_NAME" in
+                workflow:in-progress) status="In Progress" ;;
+                workflow:review) status="Review" ;;
+                *) echo "::error::Unexpected label"; exit 1 ;;
+              esac
+              ;;
+            workflow_dispatch)
+              status="$INPUT_STATUS"
+              case "$INPUT_KIND" in
+                issue) item_path="issues/$INPUT_NUMBER" ;;
+                pull_request) item_path="pulls/$INPUT_NUMBER" ;;
+                *) echo "::error::Invalid item type"; exit 1 ;;
+              esac
+              # This repository is public. No untrusted event text is evaluated.
+              content_id="$(gh api "repos/$REPOSITORY/$item_path" --jq '.node_id')"
+              ;;
+            *)
+              echo "::error::Unexpected workflow event"; exit 1
+              ;;
+          esac
+
+          test -n "$content_id" || { echo "::error::Missing GitHub node ID"; exit 1; }
+
+          project_json="$(gh api graphql \
+            -f query='
+              query($owner: String!, $number: Int!) {
+                user(login: $owner) {
+                  projectV2(number: $number) {
+                    id
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          name
+                          options { id name }
+                        }
+                      }
+                    }
+                  }
+                }
+              }' \
+            -f owner="$PROJECT_OWNER" -F number="$PROJECT_NUMBER")"
+
+          project_id="$(jq -er '.data.user.projectV2.id' <<< "$project_json")"
+          field_id="$(jq -er '.data.user.projectV2.fields.nodes[] | select(.name == "Status") | .id' <<< "$project_json")"
+          option_id="$(jq -er --arg desired "$status" \
+            '.data.user.projectV2.fields.nodes[] | select(.name == "Status") | .options[] | select(.name == $desired) | .id' \
+            <<< "$project_json")"
+
+          # GitHub returns the existing item ID when the item is already linked.
+          item_id="$(gh api graphql \
+            -f query='
+              mutation($project: ID!, $content: ID!) {
+                addProjectV2ItemById(input: {projectId: $project, contentId: $content}) {
+                  item { id }
+                }
+              }' \
+            -f project="$project_id" -f content="$content_id" \
+            --jq '.data.addProjectV2ItemById.item.id')"
+          test -n "$item_id" || { echo "::error::Unable to obtain project item ID"; exit 1; }
+
+          gh api graphql \
+            -f query='
+              mutation($project: ID!, $item: ID!, $field: ID!, $choice: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $project
+                  itemId: $item
+                  fieldId: $field
+                  value: { singleSelectOptionId: $choice }
+                }) {
+                  projectV2Item { id }
+                }
+              }' \
+            -f project="$project_id" -f item="$item_id" \
+            -f field="$field_id" -f choice="$option_id" \
+            --jq '.data.updateProjectV2ItemFieldValue.projectV2Item.id' > /dev/null
+
+          echo "Project status set to: $status"
+          echo "Status: **$status**" >> "$GITHUB_STEP_SUMMARY"
