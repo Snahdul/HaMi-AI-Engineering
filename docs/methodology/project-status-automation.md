@@ -34,9 +34,9 @@ Das Ergebnis ist ereignisgetrieben: **kein festes 15-Minuten-Wartefenster**. Git
 
 ## Voraussetzung: fünfter Project-Statuswert
 
-Vor der Übernahme des Cancelled-Folge-PRs muss im [GitHub Project #1](https://github.com/users/Snahdul/projects/1) das bestehende Single-Select-Feld **`Status`** um die zusätzliche Option **`Cancelled`** (exakte Groß-/Kleinschreibung) ergänzt werden. Pfad: **Project → Settings → Fields → Status → Add option → Cancelled → Save**. Die bestehenden vier Optionen bleiben unverändert. Ein GitHub-Repository-Connector kann diese ProjectV2-Feldkonfiguration nicht direkt ändern.
+Am 16.11.2026 hat der Repositoryinhaber im [GitHub Project #1](https://github.com/users/Snahdul/projects/1) die Option **`Cancelled`** (exakte Schreibweise) im Single-Select-Feld **`Status`** ergänzt und alle bestehenden Optionen beibehalten. Die Einstellung wurde per Screenshot kontrolliert. [PR #19](https://github.com/Snahdul/HaMi-AI-Engineering/pull/19) wurde nach ausdrücklicher menschlicher Freigabe in `main` gemergt (Commit `fe3135cd`).
 
-Die privilegierte Action validiert die vorhandene Option vor jedem Statusabgleich und beendet den Lauf **mit einem expliziten Fehler**, wenn `Cancelled` fehlt. Das verhindert stille Fehlklassifikationen. Erst danach darf der Code gemergt und live getestet werden.
+Die privilegierte Action validiert die Option bei jedem Statusabgleich und meldet einen **expliziten Fehler**, falls sie fehlt. Der nun fehlgeschlagene Live-Test bei PR #20 kam **erst nach** dieser Prüfung bis zur Projekt-Item-Auflösung; Ursache und geplanter Fallback sind nachstehend dokumentiert.
 
 ## Resilienz bei verspäteten oder fehlenden Project-Einträgen
 
