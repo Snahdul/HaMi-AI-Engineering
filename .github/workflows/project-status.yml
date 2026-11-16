@@ -131,6 +131,18 @@ jobs:
               echo "::warning::Project entry/initial status not available: $node_id"
               return 1
             fi
+            # Scheduled PR reconciliation must not override a human review
+            # decision merely because GitHub still marks the PR as Draft.
+            if [ "${4:-}" = "pr-scheduled" ]; then
+              if [ "$prior" = "Done" ]; then
+                echo "$node_id: already Done; leaving human/completion state unchanged"
+                return 0
+              fi
+              if [ "$prior" = "Review" ] && [ "$desired" = "In Progress" ]; then
+                echo "$node_id: keeping human Review status for a Draft PR"
+                return 0
+              fi
+            fi
             if [ "$prior" = "$desired" ]; then
               echo "$node_id: already $desired"; return 0
             fi
@@ -196,9 +208,9 @@ jobs:
                 pr="$(gh api "repos/$REPOSITORY/pulls/$number")"
                 [ "$(jq -r '.state' <<< "$pr")" = "open" ] || continue
                 if [ "$(jq -r '.draft' <<< "$pr")" = "true" ]; then
-                  sync_one "$node_id" "In Progress" 2 || true
+                  sync_one "$node_id" "In Progress" 2 pr-scheduled || true
                 else
-                  sync_one "$node_id" "Review" 2 || true
+                  sync_one "$node_id" "Review" 2 pr-scheduled || true
                 fi
               done <<< "$open_prs"
 
