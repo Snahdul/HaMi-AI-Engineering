@@ -9,7 +9,7 @@ Issue/PR-Zustände und GitHub-Project-Statuswerte sind unabhängig. Die GitHub-I
 ## Architektur und Zuständigkeit
 
 1. **GitHub Projects (eingebaut):** `Item added to project → Todo`, `Issue/PR closed → Done` und `PR merged → Done`. Für diese Workflows werden keine neuen Zugangsdaten benötigt. Automatisches Hinzufügen neuer Issues und PRs kann projektseitig aktiviert werden.
-2. **Repository-Action `project-status.yml`:** Mit einem im Repository als Secret hinterlegten Projekt-Token setzt sie `In Progress` oder `Review`, wenn ein vertrauenswürdiges Ereignis eintritt.
+2. **Repository-Action `project-status.yml`:** Mit einem im Repository als Secret hinterlegten Projekt-Token setzt sie `In Progress` oder `Review`, wenn ein vertrauenswürdiges Ereignis eintritt. Bei PR-Ereignissen wird ausschließlich die bereits geprüfte Workflow-Datei aus `main` ausgeführt; es wird kein PR-Code ausgecheckt.
 3. **Menschliche Entscheidung:** Die eigentliche Freigabe und der Merge werden dadurch *nicht* automatisiert. Die Action ändert nur das Project-Statusfeld, nicht den Issue- oder PR-Zustand.
 
 | Ereignis | Zielstatus |
@@ -63,20 +63,21 @@ Das Label `workflow:review` soll erst nach tatsächlicher Reviewbereitschaft ges
 
 ## Sicherheitsgrenzen des Workflows
 
-- **Kein `pull_request_target`**, kein Checkout und keine Ausführung von Code aus Pull Requests.
+- **`pull_request_target` nur für PR-Metadaten:** Der Workflow stammt aus dem geschützten Default-Branch; kein Checkout, kein Ausführen von PR-Code oder externen Skripten. Das erhöhte Vertrauensniveau wird bewusst auf diese Aufgabe begrenzt.
 - PR-Events von Forks sind vom Job ausgeschlossen; nur PRs aus dem eigenen Repository sind zugelassen.
 - Das Projekt-Token wird nur aus einem GitHub-Actions-Secret gelesen; Workflow-Code darf es nicht ausgeben.
 - Die Action verwendet ausschließlich die node IDs des jeweiligen GitHub-Ereignisses oder eine bewusst gestartete `workflow_dispatch`-Aktion.
+- **Race-Condition-Schutz:** Die Action fügt selbst keine Items hinzu. Sie wartet auf `Auto-add` und den ersten gesetzten Status (normalerweise `Todo`), bevor sie den Status verändert. Bei Verzögerung über 90 Sekunden schlägt der Lauf sichtbar fehl; er kann dann manuell neu gestartet werden. Gleichzeitige Läufe pro Item werden abgebrochen/ersetzt und abgeschlossene Issues bzw. PRs nicht nachträglich zurückgestuft.
 - `permissions: {}` verhindert zusätzliche Repositoryrechte des temporären `GITHUB_TOKEN`.
 - Bei fehlender Variable, Secret, Feld- oder Statusoption schlägt der Lauf sichtbar fehl, anstatt einen Erfolg zu behaupten.
 
 ## Abnahme- und Funktionstest nach Einrichtung
 
 1. GitHub-Project-Nummer, Token-Secret und Labelnamen kontrollieren.
-2. Workflow-PR fachlich/sicherheitstechnisch prüfen und ausdrücklich freigeben; erst danach in `main` mergen.
+2. Workflow-PR einschließlich des sicherheitsrelevanten `pull_request_target`-Triggers fachlich/sicherheitstechnisch prüfen und ausdrücklich freigeben; erst danach in `main` mergen.
 3. Unter `Actions → HaMi GitHub Project status → Run workflow` das bereits abgeschlossene **Issue #2** mit Status **Done** setzen und den Board-Wert kontrollieren. Dies dient als idempotenter Test ohne ungewollte Änderungen aktiver Aufgaben.
 4. Mit einem aktiven Issue den Übergang `Todo → In Progress` per Label testen; anschließend kontrolliert `In Progress → Review`.
-5. Neuen internen Draft-PR öffnen; prüfen, dass er automatisch in `In Progress` erscheint. Später `ready for review` und `merged` getrennt prüfen.
+5. Neuen internen Draft-PR öffnen; prüfen, dass der `Auto-add`-Workflow zuerst `Todo` setzt und die Action danach zuverlässig `In Progress` schreibt. Später `ready for review` und `merged` getrennt prüfen. Bei einem Verzögerungsfehler kann die manuelle Workflow-Ausführung zur Korrektur genutzt werden.
 6. Prüfergebnisse in [Issue #10](https://github.com/Snahdul/HaMi-AI-Engineering/issues/10) dokumentieren. **Bis dahin ist die Automatisierung nicht als produktiv oder getestet zu bezeichnen.**
 
 ## Quellen
