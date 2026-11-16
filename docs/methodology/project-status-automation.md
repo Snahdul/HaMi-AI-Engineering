@@ -59,7 +59,7 @@ Im Repository `Snahdul/HaMi-AI-Engineering` → `Settings → Secrets and variab
 
 Einmalig im Repository unter `Issues → Labels` die Labels `workflow:in-progress` und `workflow:review` anlegen. Anschließend kann ChatGPT über die vorhandene GitHub-Integration bei Aufgabenbeginn bzw. nach Abschluss der technischen Prüfungen das entsprechende Label setzen. Ein neues Label-Ereignis startet die Action.
 
-Das Label `workflow:review` soll erst nach tatsächlicher Reviewbereitschaft gesetzt werden. Bei Rücknahme einer Freigabe kann die Action über `workflow_dispatch` oder ein neues `workflow:in-progress`-Label-Ereignis den Status korrigieren.
+Das Label `workflow:review` soll erst nach tatsächlicher Reviewbereitschaft gesetzt werden. **Die beiden Statuslabels sind gegenseitig auszuschließen:** Beim Wechsel nach `Review` erst `workflow:in-progress` entfernen, dann `workflow:review` setzen; bei Rückkehr nach `In Progress` umgekehrt. Ein bereits vorhandenes Label erneut hinzuzufügen löst nicht zuverlässig ein neues `labeled`-Ereignis aus. Alternativ kann die Action über `workflow_dispatch` den Status gezielt korrigieren.
 
 ## Sicherheitsgrenzen des Workflows
 
