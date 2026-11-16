@@ -23,7 +23,7 @@ on:
       status:
         description: "Desired project status"
         type: choice
-        options: [Todo, In Progress, Review, Done]
+        options: [Todo, In Progress, Review, Done, Cancelled]
         required: true
 
 # No privileged PR trigger. The secret is used only from the default branch,
@@ -88,6 +88,13 @@ jobs:
             -f owner="$PROJECT_OWNER" -F number="$PROJECT_NUMBER")"
           project_id="$(jq -er '.data.user.projectV2.id' <<< "$project")"
           field_id="$(jq -er '.data.user.projectV2.fields.nodes[] | select(.name == "Status") | .id' <<< "$project")"
+          # Fail explicitly until the Status field has the required fifth option.
+          if ! jq -e '.data.user.projectV2.fields.nodes[] |
+            select(.name == "Status") | .options[] |
+            select(.name == "Cancelled")' <<< "$project" >/dev/null; then
+            echo "::error::Status option 'Cancelled' is missing in Project #$PROJECT_NUMBER (Settings > Fields > Status)"
+            exit 1
+          fi
 
           # Read existing project entries; the built-in workflows own Auto-add/Todo.
           find_item() {
@@ -144,8 +151,10 @@ jobs:
               echo "::warning::Project entry/initial status not available: $node_id"
               return 1
             fi
-            # The scheduled sync must never reactivate a completed PR.
-            if [ "${4:-}" = "pr-scheduled" ] && [ "$prior" = "Done" ]; then
+            # Do not reactivate a merged/completed PR. An unmerged closure
+            # may correct a previously incorrect Done to Cancelled.
+            if [ "${4:-}" = "pr-scheduled" ] && [ "$prior" = "Done" ] &&
+               [ "$desired" != "Cancelled" ]; then
               echo "$node_id: already Done; leaving completion state unchanged"
               return 0
             fi
@@ -189,23 +198,38 @@ jobs:
           # Trusted base-branch code reads the CURRENT PR state.
           # Never check out, evaluate or execute code or text from a pull request.
           sync_pr() {
-            local number="$1" pr labels target origin
+            local number="$1" retries="${2:-20}" pr labels target origin state
             pr="$(gh api "repos/$REPOSITORY/pulls/$number")"
-            if [ "$(jq -r '.state' <<< "$pr")" != "open" ]; then return 0; fi
             origin="$(jq -r '.head.repo.full_name // ""' <<< "$pr")"
             if [ "$origin" != "$REPOSITORY" ]; then
               echo "Ignoring PR from external repository"
               return 0
             fi
-            labels="$(jq -c '[.labels[].name]' <<< "$pr")"
-            if jq -e 'index("workflow:review") != null' <<< "$labels" >/dev/null; then
-              target="Review"
-            elif jq -e 'index("workflow:in-progress") != null' <<< "$labels" >/dev/null; then
-              target="In Progress"
-            else
-              target="Review"
-            fi
-            sync_one "$(jq -er '.node_id' <<< "$pr")" "$target" 20 pr-scheduled
+            state="$(jq -er '.state' <<< "$pr")"
+            case "$state" in
+              closed)
+                if [ "$(jq -r '.merged_at // ""' <<< "$pr")" != "" ]; then
+                  echo "PR #$number was merged; GitHub Projects owns Done"
+                  return 0
+                fi
+                target="Cancelled"
+                ;;
+              open)
+                labels="$(jq -c '[.labels[].name]' <<< "$pr")"
+                if jq -e 'index("workflow:review") != null' <<< "$labels" >/dev/null; then
+                  target="Review"
+                elif jq -e 'index("workflow:in-progress") != null' <<< "$labels" >/dev/null; then
+                  target="In Progress"
+                else
+                  target="Review"
+                fi
+                ;;
+              *)
+                echo "::error::Unknown PR state '$state' for #$number"
+                return 1
+                ;;
+            esac
+            sync_one "$(jq -er '.node_id' <<< "$pr")" "$target" "$retries" pr-scheduled
           }
 
           case "$EVENT_NAME" in
@@ -217,9 +241,9 @@ jobs:
               if [[ "$SIGNAL_PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
                 sync_pr "$SIGNAL_PR_NUMBER"
               else
-                # Some workflow_run payloads omit pull_requests. Match the
-                # current internal PR head branch using only GitHub API data.
-                candidates="$(gh api "repos/$REPOSITORY/pulls?state=open&per_page=100" \
+                # workflow_run.pull_requests may be empty, especially on close.
+                # Include closed PRs so the fallback can resolve cancellations.
+                candidates="$(gh api "repos/$REPOSITORY/pulls?state=all&per_page=100" \
                   --paginate --jq '.[] | [.number, .head.ref, (.head.repo.full_name // "")] | @tsv')"
                 found=false
                 while IFS=$'\t' read -r number head_branch origin; do
@@ -230,7 +254,7 @@ jobs:
                   fi
                 done <<< "$candidates"
                 if [ "$found" != "true" ]; then
-                  echo "No open internal PR matches the event; it may already be closed"
+                  echo "No internal PR matches the signal branch"
                 fi
               fi
               ;;
@@ -244,33 +268,51 @@ jobs:
                 *) echo "::error::Invalid item type"; exit 1 ;;
               esac
               item="$(gh api "repos/$REPOSITORY/$endpoint")"
-              if [ "$(jq -r '.state' <<< "$item")" != "open" ] &&
-                 [ "$INPUT_STATUS" != "Done" ]; then
-                echo "::error::Cannot reactivate a closed item"; exit 1
+              item_state="$(jq -er '.state' <<< "$item")"
+              if [ "$INPUT_KIND" = "pull_request" ]; then
+                merged_at="$(jq -r '.merged_at // ""' <<< "$item")"
+                case "$INPUT_STATUS" in
+                  Cancelled)
+                    if [ "$item_state" != "closed" ] || [ -n "$merged_at" ]; then
+                      echo "::error::Cancelled requires an unmerged closed PR"; exit 1
+                    fi
+                    ;;
+                  Done)
+                    if [ -z "$merged_at" ]; then
+                      echo "::error::Done requires a merged PR"; exit 1
+                    fi
+                    ;;
+                  *)
+                    if [ "$item_state" != "open" ]; then
+                      echo "::error::Cannot reactivate a closed PR manually"; exit 1
+                    fi
+                    ;;
+                esac
+              else
+                if [ "$INPUT_STATUS" = "Cancelled" ]; then
+                  echo "::error::Cancelled is reserved for unmerged closed PRs"; exit 1
+                fi
+                if [ "$item_state" != "open" ] && [ "$INPUT_STATUS" != "Done" ]; then
+                  echo "::error::Cannot reactivate a closed issue"; exit 1
+                fi
               fi
               sync_one "$(jq -er '.node_id' <<< "$item")" "$INPUT_STATUS" 20
               ;;
             schedule)
-              # An open PR requests human review, including a Draft PR.
-              # workflow:in-progress explicitly opts into continued development.
-              # Only PRs from this repository are synchronized.
-              open_prs="$(gh api "repos/$REPOSITORY/pulls?state=open&per_page=100" \
-                --paginate --jq '.[] | [.number, .node_id, (.head.repo.full_name // "")] | @tsv')"
-              while IFS=$'\t' read -r number node_id origin; do
+              # Recover missing PR events, including unmerged closed PRs.
+              open_pr_numbers="$(gh api "repos/$REPOSITORY/pulls?state=open&per_page=100" \
+                --paginate --jq '.[].number')"
+              while IFS= read -r number; do
                 [ -n "$number" ] || continue
-                [ "$origin" = "$REPOSITORY" ] || continue
-                pr="$(gh api "repos/$REPOSITORY/pulls/$number")"
-                [ "$(jq -r '.state' <<< "$pr")" = "open" ] || continue
-                pr_labels="$(jq -c '[.labels[].name]' <<< "$pr")"
-                if jq -e 'index("workflow:review") != null' <<< "$pr_labels" >/dev/null; then
-                  target="Review"
-                elif jq -e 'index("workflow:in-progress") != null' <<< "$pr_labels" >/dev/null; then
-                  target="In Progress"
-                else
-                  target="Review"
-                fi
-                sync_one "$node_id" "$target" 2 pr-scheduled || true
-              done <<< "$open_prs"
+                sync_pr "$number" 2 || true
+              done <<< "$open_pr_numbers"
+
+              closed_unmerged_numbers="$(gh api "repos/$REPOSITORY/pulls?state=closed&per_page=100" \
+                --paginate --jq '.[] | select(.merged_at == null) | .number')"
+              while IFS= read -r number; do
+                [ -n "$number" ] || continue
+                sync_pr "$number" 2 || true
+              done <<< "$closed_unmerged_numbers"
 
               # Repair any missed issue label events as well.
               active_issues="$(gh api "repos/$REPOSITORY/issues?state=open&per_page=100" \
