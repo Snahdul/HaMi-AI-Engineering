@@ -190,7 +190,7 @@ jobs:
               # Only PRs whose head repository is this repository are handled.
               open_prs="$(gh api "repos/$REPOSITORY/pulls?state=open&per_page=100" \
                 --paginate --jq '.[] | [.number, .node_id, (.head.repo.full_name // "")] | @tsv')"
-              while IFS=
+              while IFS=$'\t' read -r number node_id origin; do
                 [ -n "$number" ] || continue
                 [ "$origin" = "$REPOSITORY" ] || continue
                 pr="$(gh api "repos/$REPOSITORY/pulls/$number")"
@@ -210,59 +210,6 @@ jobs:
                     select(($labels | index("workflow:review")) != null or
                            ($labels | index("workflow:in-progress")) != null)) |
                   .number')"
-              while IFS=
-                [ -n "$number" ] || continue
-                sync_issue "$number" 2 || true
-              done <<< "$active_issues"
-              ;;
-            *)
-              echo "::error::Unsupported event"; exit 1
-              ;;
-          esac
-\t' read -r number node_id origin; do
-                [ -n "$number" ] || continue
-                [ "$origin" = "$REPOSITORY" ] || continue
-                pr="$(gh api "repos/$REPOSITORY/pulls/$number")"
-                [ "$(jq -r '.state' <<< "$pr")" = "open" ] || continue
-                if [ "$(jq -r '.draft' <<< "$pr")" = "true" ]; then
-                  sync_one "$node_id" "In Progress" 2 || true
-                else
-                  sync_one "$node_id" "Review" 2 || true
-                fi
-              done <<< "$open_prs"
-
-              # Repair any missed issue label events as well.
-              while IFS=$'\t' read -r number; do
-                [ -n "$number" ] || continue
-                sync_issue "$number" 2 || true
-              done <<< "$active_issues"
-              ;;
-            *)
-              echo "::error::Unsupported event"; exit 1
-              ;;
-          esac
-\t' read -r number; do
-                [ -n "$number" ] || continue
-                sync_issue "$number" 2 || true
-              done <<< "$active_issues"
-              ;;
-            *)
-              echo "::error::Unsupported event"; exit 1
-              ;;
-          esac
-\t' read -r number node_id origin; do
-                [ -n "$number" ] || continue
-                [ "$origin" = "$REPOSITORY" ] || continue
-                pr="$(gh api "repos/$REPOSITORY/pulls/$number")"
-                [ "$(jq -r '.state' <<< "$pr")" = "open" ] || continue
-                if [ "$(jq -r '.draft' <<< "$pr")" = "true" ]; then
-                  sync_one "$node_id" "In Progress" 2 || true
-                else
-                  sync_one "$node_id" "Review" 2 || true
-                fi
-              done <<< "$open_prs"
-
-              # Repair any missed issue label events as well.
               while IFS=$'\t' read -r number; do
                 [ -n "$number" ] || continue
                 sync_issue "$number" 2 || true
