@@ -10,7 +10,7 @@ Dieses öffentliche Referenzprojekt dokumentiert die Zusammenarbeit eines erfahr
 
 - **Engineering-Workflow:** GitHub Issues als Arbeitsaufträge, Pull Requests als überprüfbare Änderungen und Architecture Decision Records (ADRs).
 - **Verantwortlichkeiten:** Der Entwickler definiert Ziele, prüft und entscheidet. ChatGPT unterstützt mit Analyse, Lösungsvarianten, Umsetzung, Fehlersuche und Dokumentation.
-- **Fallstudien:** HaMiPulse, Tara, Architekturpraxis und HaMiHeimnetz – bewusst abstrahiert und ohne vertrauliche Inhalte.
+- **Fallstudien:** Zuerst die öffentlich nachprüfbare **Entstehung dieses Referenzprojekts**, danach HaMiPulse als technische Praxis und eine eigenständig ausführbare .NET-Demo. Weitere Beispiele folgen bewusst abstrahiert und ohne vertrauliche Inhalte.
 - **Demonstration:** Eine kleine .NET-Anwendung, deren Entwicklung öffentlich nachvollziehbar ist (geplant).
 
 ## Der Ablauf
@@ -37,7 +37,8 @@ Dokumentation, Erkenntnisse, Issue-Abschluss
 | --- | --- |
 | Entwicklungsmethodik | [Workflow](docs/methodology/workflow.md) |
 | Rollen und Grenzen | [Verantwortlichkeiten](docs/methodology/responsibilities.md) |
-| Erste Fallstudie | [HaMiPulse – Flugkarte](docs/case-studies/hami-pulse.md) |
+| Erste Fallstudie – öffentlicher Prozess | [Entstehung von HaMi AI Engineering](docs/case-studies/hami-ai-engineering.md) |
+| Zweite Fallstudie – technische Praxis | [HaMiPulse – Flugkarte](docs/case-studies/hami-pulse.md) |
 | Publikationsgrenzen | [ADR-0001](docs/decisions/ADR-0001-publication-boundary.md) |
 | Roadmap | [Roadmap](docs/ROADMAP.md) |
 | Geplante .NET-Demo | [Demo](demo/README.md) |
