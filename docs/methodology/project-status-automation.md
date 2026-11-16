@@ -16,19 +16,27 @@ GitHub Issue/PR-Zustände und das GitHub-Project-Feld `Status` sind unabhängig.
 | PR mit `workflow:review` | Review | Vorrang vor einem widersprüchlichen In-Progress-Label |
 | Issue geschlossen | Done | GitHub Projects: `Item closed` (nur Issues) |
 | PR gemergt | Done | GitHub Projects: `Pull request merged` |
+| PR ohne Merge geschlossen | Cancelled | `pull_request:closed` → Secret-freies Signal → geschützter Statusabgleich |
+| PR aus `Cancelled` wiedereröffnet | Review / In Progress | `pull_request:reopened` und aktuelle Labels |
 
-Die beiden Workflow-Labels sollen im Normalfall gegenseitig exklusiv sein. Ein PR braucht **kein** Label, um automatisch in `Review` zu gelangen.
+Die beiden Workflow-Labels sollen im Normalfall gegenseitig exklusiv sein. Ein PR braucht **kein** Label, um automatisch in `Review` zu gelangen. Ein geschlossener, nicht gemergter PR gehört in `Cancelled`, nicht in `Done`. **Issue-Abschlüsse bleiben unverändert:** `Item closed` ist im Project nur für Issues aktiviert und setzt `Done`.
 
 ## Ereignisgesteuerte PR-Synchronisierung ohne Polling-Verzögerung
 
 Zwei getrennte Workflow-Dateien sorgen für eine Sicherheitsgrenze:
 
-1. **`.github/workflows/pr-status-signal.yml`** – `HaMi PR status signal`: lauscht auf die PR-Ereignisse `opened`, `reopened`, `labeled`, `unlabeled`, `ready_for_review`, `converted_to_draft`, `synchronize`. Dieser Workflow hat `permissions: {}`, verwendet **keine Secrets**, checkt **keinen PR-Code** aus und verarbeitet nur interne PRs.
-2. **`.github/workflows/project-status.yml`** – `HaMi GitHub Project status`: reagiert über `workflow_run: completed` auf ein **erfolgreiches** PR-Signal. Diese zweite Workflow-Datei wird aus dem geschützten Default-Branch ausgeführt und darf das GitHub-Actions-Secret `HAMI_PROJECT_TOKEN` verwenden. Sie prüft die PR-Quelle erneut, ermittelt den konkreten PR (über dessen Nummer oder, falls GitHub sie nicht liefert, über den internen Head-Branch) und liest seinen **aktuellen** Status und seine Labels über GitHubs API. Erst dann wird das Project-Statusfeld aktualisiert.
+1. **`.github/workflows/pr-status-signal.yml`** – `HaMi PR status signal`: lauscht auf die PR-Ereignisse `opened`, `reopened`, `closed`, `labeled`, `unlabeled`, `ready_for_review`, `converted_to_draft`, `synchronize`. Dieser Workflow hat `permissions: {}`, verwendet **keine Secrets**, checkt **keinen PR-Code** aus und verarbeitet nur interne PRs.
+2. **`.github/workflows/project-status.yml`** – `HaMi GitHub Project status`: reagiert über `workflow_run: completed` auf ein **erfolgreiches** PR-Signal. Diese zweite Workflow-Datei wird aus dem geschützten Default-Branch ausgeführt und darf das GitHub-Actions-Secret `HAMI_PROJECT_TOKEN` verwenden. Sie prüft die PR-Quelle erneut, ermittelt den konkreten PR (über dessen Nummer oder, falls GitHub sie nicht liefert, über den internen Head-Branch) und liest seinen **aktuellen** Status, `merged_at` und seine Labels über GitHubs API. Ein offener PR wird anhand der Labels eingeordnet; ein geschlossener PR mit `merged_at == null` erhält `Cancelled`. Bei bereits gemergten PRs greift ausschließlich die bestehende eingebaute `Done`-Automatik.
 
 Das Ergebnis ist ereignisgetrieben: **kein festes 15-Minuten-Wartefenster**. GitHub-Actions-Queues können trotzdem eine variable Ausführungsverzögerung verursachen. Die beiden Stufen werden asynchron durch GitHub abgewickelt; Sekundenlatenz ist nicht garantiert.
 
-**Ausfallsicherung:** Ein geplanter Abgleich läuft zusätzlich **täglich um 03:17 UTC**, um verpasste Ereignisse oder ältere offene PRs nachzuführen. Die tägliche Ausführung ist keine Voraussetzung für den normalen Statuswechsel.
+**Ausfallsicherung:** Ein geplanter Abgleich läuft zusätzlich **täglich um 03:17 UTC**, um verpasste Ereignisse, ältere offene PRs **und ohne Merge geschlossene PRs** nachzuführen. Die tägliche Ausführung ist keine Voraussetzung für den normalen Statuswechsel.
+
+## Voraussetzung: fünfter Project-Statuswert
+
+Vor der Übernahme des Cancelled-Folge-PRs muss im [GitHub Project #1](https://github.com/users/Snahdul/projects/1) das bestehende Single-Select-Feld **`Status`** um die zusätzliche Option **`Cancelled`** (exakte Groß-/Kleinschreibung) ergänzt werden. Pfad: **Project → Settings → Fields → Status → Add option → Cancelled → Save**. Die bestehenden vier Optionen bleiben unverändert. Ein GitHub-Repository-Connector kann diese ProjectV2-Feldkonfiguration nicht direkt ändern.
+
+Die privilegierte Action validiert die vorhandene Option vor jedem Statusabgleich und beendet den Lauf **mit einem expliziten Fehler**, wenn `Cancelled` fehlt. Das verhindert stille Fehlklassifikationen. Erst danach darf der Code gemergt und live getestet werden.
 
 ## Sicherheitsarchitektur
 
@@ -64,9 +72,21 @@ Der Dokumentations-[PR #17](https://github.com/Snahdul/HaMi-AI-Engineering/pull/
 
 **Bewertung:** Alle drei ausgelösten Signal-Workflows haben den geschützten `workflow_run` gestartet, und die Statusänderung wurde jeweils durch eine echte GraphQL-`updateProjectV2ItemFieldValue`-Mutation im Job protokolliert. Der Test belegt den Normalbetrieb **ohne festen 15-Minuten-Pollingzyklus**. GitHub-Actions-Queues können weiterhin Verzögerungen verursachen.
 
-**Noch offen:** Menschliche Dokumentations-/Mergefreigabe für PR #17, separate Prüfung des täglichen Wiederherstellungslaufs und der GitHub-Projects-`Done`-Automationen sowie Token-Ablauf/-Rotation in [Issue #10](https://github.com/Snahdul/HaMi-AI-Engineering/issues/10).
+**Stand 16.11.2026:** [PR #17](https://github.com/Snahdul/HaMi-AI-Engineering/pull/17) wurde nach menschlicher Freigabe gemergt (Commit `e0e82787`). Die PR-Timeline bestätigt eine automatische Project-Statusänderung durch `github-project-automation[bot]` unmittelbar nach dem Merge; der konkrete Wert `Done` wurde über die auslesbare REST-Timeline nicht separat bestätigt. Der tägliche Recovery-Lauf, der `Cancelled`-Fall und Token-Ablauf/-Rotation werden in [Issue #10](https://github.com/Snahdul/HaMi-AI-Engineering/issues/10) und [Issue #18](https://github.com/Snahdul/HaMi-AI-Engineering/issues/18) geprüft.
 
 **Die PR-Statusregeln lösen niemals eigenständig einen Merge aus; die fachliche und rechtliche Freigabe bleibt menschlich.**
+
+## Abnahme des Status `Cancelled` (Issue #18)
+
+1. Die Option `Cancelled` ist im GitHub-Project-Statusfeld angelegt; alle fünf Werte sind auswählbar.
+2. Den Folge-PR nach fachlicher Freigabe in `main` mergen. **Nicht** zum Testen vorhandene Arbeits-PRs #12/#13 schließen.
+3. Einen separaten Test-PR auf Basis des dann aktuellen `main` als Draft eröffnen und den Initialstatus `Review` sowie beide Actions-Stufen bestätigen.
+4. Test-PR **ohne Merge** schließen. Die unprivilegierte `pull_request:closed`-Action und der geschützte `workflow_run` müssen den Wechsel `Review → Cancelled` protokollieren.
+5. Den Test-PR wiedereröffnen und den Wechsel `Cancelled → Review` bestätigen; anschließend kontrolliert schließen oder zur Abnahme vorlegen.
+6. Bei einem bereits **gemergten** PR muss `Done` erhalten bleiben. Der tägliche Recovery-Lauf darf keine gemergten PRs nach `Cancelled` verschieben.
+7. Label-Ereignisse bei älteren PR-Branches ohne Signal-Workflow können ausbleiben; die tägliche Recovery muss geschlossene PRs dann nachführen.
+
+Die manuelle Action `workflow_dispatch` akzeptiert `Cancelled` nur für **geschlossene, nicht gemergte PRs** und `Done` nur für **gemergte PRs**; bei Issues bleiben die bisherigen Statusregeln bestehen. Keine Test-PRs ohne menschliche Freigabe mergen. Ergebnisse in [Issue #18](https://github.com/Snahdul/HaMi-AI-Engineering/issues/18) dokumentieren.
 
 ## Quellen
 
