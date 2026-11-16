@@ -1,6 +1,6 @@
 # Fallstudie: HaMiPulse – Vom ADS-B-Signal zur sichtbaren Flugkarte
 
-**Status (16.11.2026):** Öffentlicher Entwurf im Review. Die zwei öffentlich vorgesehenen Zugangswege sind durch den Homepage-Quellcode belegt. Ein realer Linux-Fehlerfall ist technisch dokumentiert und nach lokaler Korrektur funktional bestätigt. Die aktuelle externe Live-Prüfung und ein freigegebener Screenshot stehen noch aus.
+**Status (16.11.2026):** Öffentlicher Entwurf im Review. Beide veröffentlichten Kartenlinks wurden vom Repositoryinhaber im Browser erfolgreich aufgerufen; zwei zur Prüfung bereitgestellte Screenshots zeigen die Homepage-Einbettung und die direkte tar1090-Ansicht mit Flugzeugsymbolen. Ein realer Linux-Fehlerfall ist technisch dokumentiert. Eine kontinuierliche Positionsaktualisierung ist mit den beiden Einzelbildern allein nicht nachgewiesen.
 
 ## Ziel und Nutzerwert
 
@@ -17,7 +17,7 @@ Die Fallstudie demonstriert eine Zusammenarbeit von Entwickler und ChatGPT mit m
 
 Die URL und Einbettung sind im [öffentlich einsehbaren Homepage-Quellcode](https://github.com/Snahdul/homepage/blob/main/app/himmel-ueber-trier/page.tsx) nachgewiesen. Die Umsetzung der Homepage ist außerdem im öffentlichen [Homepage-Issue #24](https://github.com/Snahdul/homepage/issues/24) nachvollziehbar.
 
-**Wichtig:** Das sind zwei Zugangswege zur gleichen Datenansicht, **keine zwei unabhängig entwickelten Flugkarten**. Eine erneute Prüfung im externen Browser, ob beide Zugänge gerade erreichbar sind, Flugzeuge anzeigen und neue Positionen nachführen, wurde für diese Dokumentationsfassung noch nicht abgeschlossen.
+**Wichtig:** Das sind zwei Zugangswege zur gleichen Datenansicht, **keine zwei unabhängig entwickelten Flugkarten**. **Manuelle Sichtprüfung durch den Repositoryinhaber am 16.11.2026:** Beide Links funktionieren im Browser. Die dazu bereitgestellten Screenshots zeigen jeweils eine gerenderte Karte mit Flugzeugsymbolen. Einzelbilder beweisen weder ein bestimmtes Aktualisierungsintervall noch einen ausfallsicheren Dauerbetrieb. Die Bilder werden hier nicht eingebettet, da sie auch Kartenkacheln und Softwareoberflächen Dritter enthalten; für eine gesonderte Bildpublikation wären deren Lizenz- und Attributionsbedingungen zu prüfen.
 
 ## Die technische Herausforderung
 
@@ -90,20 +90,21 @@ Der öffentliche Ablauf dieses **Referenzrepositories** lässt sich am [Dokument
 
 | Aussage | Vorliegender Beleg | Grenze |
 | --- | --- | --- |
-| Zwei öffentliche Zugangswege zur Flugkarte | [Homepage-Quellcode](https://github.com/Snahdul/homepage/blob/main/app/himmel-ueber-trier/page.tsx) | Aktueller externer Live-Test steht aus |
+| Zwei öffentliche Zugangswege zur Flugkarte | [Homepage-Quellcode](https://github.com/Snahdul/homepage/blob/main/app/himmel-ueber-trier/page.tsx), manueller Browser-Funktionstest und zwei zur Review bereitgestellte Screenshots vom 16.11.2026 | Sichtbare Flugzeugsymbole bestätigt; Bewegung/Aktualisierungsfrequenz nicht allein aus Einzelbildern belegbar |
 | tar1090 als Kartenkomponente Dritter | [tar1090-Projekt](https://github.com/wiedehopf/tar1090) und Homepage-Quellcode | Keine Behauptung einer eigenen Kartenimplementierung |
 | Eigener Datenverarbeitungs- und Persistenzzweig | Zeitbezogene interne technische Diagnose und Persistenzprüfung | Kein Beleg für ununterbrochenen Betrieb zum aktuellen Zeitpunkt |
 | Linux-Assetfehler und Korrektur | Konkrete HTTP-200/404-Beobachtung, ermittelte Ursache und menschlicher Funktionstest | CI-Regressionstest und öffentliche Vorher-/Nachher-Abbildung noch nicht belegt |
-| Öffentliche Veröffentlichung dieser Fallstudie | [Issue #3](https://github.com/Snahdul/HaMi-AI-Engineering/issues/3) und dieser PR | Menschliche Inhalts- und Rechtefreigabe noch offen |
+| Öffentliche Veröffentlichung dieser Fallstudie | [Issue #3](https://github.com/Snahdul/HaMi-AI-Engineering/issues/3) und dieser PR; allgemeine Dokumentationslizenz CC BY 4.0 durch [PR #13](https://github.com/Snahdul/HaMi-AI-Engineering/pull/13) veröffentlicht | Nur die abschließende inhaltliche PR-Freigabe steht noch aus; Kartenbilder Dritter sind nicht durch die eigene CC-BY-Lizenz abgedeckt |
 
 ## Akzeptanzkriterien für die Veröffentlichung
 
 - [x] Homepage- und Cloudflare-URL mit ihrer Verknüpfung dokumentiert.
-- [ ] Beide URLs aktuell extern auf Anzeige und Positionsaktualisierung geprüft.
-- [ ] Freigegebenen, bereinigten Screenshot mit Aufnahmedatum ergänzt.
+- [x] Beide URLs am 16.11.2026 vom Repositoryinhaber im Browser geöffnet; die sichtbare Darstellung von Flugzeugsymbolen ist mit zwei Screenshots belegt. Positionsbewegungen und Aktualisierungsintervalle werden nicht aus Einzelbildern abgeleitet.
+- [x] Zwei Screenshots zur internen Review bereitgestellt und als Sichtprüfungsbeleg dokumentiert; keine ungeprüfte öffentliche Wiederveröffentlichung von Kartenkacheln/Softwareoberflächen Dritter. Die öffentlich zugänglichen Live-Links sind der primäre visuelle Beleg.
 - [x] Architektur trennt tar1090-Live-Karte und HaMiPulse-Ingestion/Persistenz.
 - [x] Realen Diagnosebefund, minimale Korrektur und Grenzen der Validierung dokumentiert.
 - [x] Keine internen IP-Adressen, Secrets, privaten Logs oder nicht freigegebenen Quellen übernommen.
-- [ ] Menschliche inhaltliche und rechtliche Prüfung sowie ausdrückliche Freigabe des Pull Requests dokumentiert.
+- [x] Die allgemeine Nachnutzungslizenz für eigene Dokumentation (CC BY 4.0) wurde mit PR #13 beschlossen und veröffentlicht; keine erneute pauschale Rechtefreigabe erforderlich.
+- [ ] Menschliche abschließende **inhaltliche** Prüfung und ausdrückliche Mergefreigabe für diesen konkreten Pull Request dokumentiert.
 
-**Weiterarbeit:** [Issue #3](https://github.com/Snahdul/HaMi-AI-Engineering/issues/3). Historische erfolgreiche Funktionstests werden nicht als aktuelle, durchgehend verfügbare Live-Daten ausgegeben.
+**Weiterarbeit:** [Issue #3](https://github.com/Snahdul/HaMi-AI-Engineering/issues/3). Der aktuelle Browser-Sichttest bestätigt die Erreichbarkeit beider Ansichten und sichtbare Flugzeugsymbole, aber keinen dauerhaft unterbrechungsfreien Betrieb. Allgemeine Lizenzfreigabe und fachliche PR-Mergefreigabe sind getrennte Entscheidungen.
