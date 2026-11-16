@@ -53,4 +53,15 @@ Erfahrungsberichte, Konzepte und nachweisbare Ergebnisse werden voneinander unte
 
 [Berufliches Profil und Projekte](https://millmann.biz)
 
-**Lizenzstatus:** Es ist noch keine ausdrückliche Nachnutzungslizenz erteilt; die Lizenzentscheidung wird als Issue dokumentiert.
+## Lizenzen
+
+Die Nachnutzung wird bewusst nach **Softwarecode** und **Dokumentation** getrennt:
+
+| Bestandteil | Lizenz |
+| --- | --- |
+| Eigenständig veröffentlichter Softwarecode, insbesondere die geplante .NET-Demo | [MIT](LICENSE) |
+| Eigene Dokumentation, Methodik, Fallstudien und erläuternde Diagramme | [CC BY 4.0](LICENSE-DOCS.md) |
+
+Die Lizenzen gelten nur für Inhalte, für die der jeweilige Rechteinhaber eine entsprechende Freigabe erteilen kann. **Private HaMi-Projekte, deren Quelltexte, interne Infrastruktur, Zugangsdaten und Inhalte Dritter sind nicht Teil dieser Freigabe.** Für Screenshots und sonstige Fremdinhalte erfolgt eine separate Rechteprüfung vor Veröffentlichung.
+
+Die Entscheidung und die technische Veröffentlichung werden in [Issue #1](https://github.com/Snahdul/HaMi-AI-Engineering/issues/1) dokumentiert.
