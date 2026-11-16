@@ -38,6 +38,16 @@ Vor der Übernahme des Cancelled-Folge-PRs muss im [GitHub Project #1](https://g
 
 Die privilegierte Action validiert die vorhandene Option vor jedem Statusabgleich und beendet den Lauf **mit einem expliziten Fehler**, wenn `Cancelled` fehlt. Das verhindert stille Fehlklassifikationen. Erst danach darf der Code gemergt und live getestet werden.
 
+## Resilienz bei verspäteten oder fehlenden Project-Einträgen
+
+Beim Live-Test von [PR #20](https://github.com/Snahdul/HaMi-AI-Engineering/pull/20) (16.11.2026) waren die `pull_request`-Signale für `opened`, `closed` und `reopened` erfolgreich. Die geschützten Folgeläufe konnten den zugehörigen ProjectV2-Eintrag jedoch nicht über die bestehende `projectV2.items`-Suche mit initialem Status auflösen und brachen jeweils nach mehreren Versuchen ab. Die PR-Timeline protokollierte zugleich `added_to_project_v2` und einen initialen Statuswechsel. **Welche Ebene die Diskrepanz verursacht hat, ist noch ungeklärt.**
+
+Der geschützte Workflow soll deshalb nach drei begrenzten Leserversuchen bei **internen PRs** das Project-Item über `addProjectV2ItemById(projectId, contentId)` auflösen. Diese GitHub-GraphQL-Mutation ist laut [offizieller GitHub-Dokumentation](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects) **idempotent**: Ist der Eintrag bereits vorhanden, liefert die API seine bestehende Item-ID zurück. Erst nach dieser gesicherten Zuordnung wird der aktuelle Status direkt am Item nachgelesen und gegebenenfalls aktualisiert. Ein bestehendes `Done` wird bei einem weiterhin offenen PR unverändert respektiert.
+
+Für Issues bleibt die ursprüngliche rein lesende Suche unverändert. Die Secret-freie PR-Signalstufe führt weiterhin keinerlei Project-Schreibzugriff aus. Ein Merge oder eine Änderung an fremden Repository-PRs wird dadurch nicht ausgelöst.
+
+**Abnahmestand:** Der Resilienz-Fallback ist als Korrektur vorgeschlagen und strukturell geprüft, **noch nicht produktiv getestet**. Die konkrete Statusmutation `Review → Cancelled` ist für PR #20 bisher nicht bestätigt. Der Live-Test wird erst nach menschlicher Freigabe und Merge der Korrektur erneut durchgeführt; Details in [Issue #18](https://github.com/Snahdul/HaMi-AI-Engineering/issues/18).
+
 ## Sicherheitsarchitektur
 
 - Das öffentliche Repository verwendet **kein `pull_request_target`**. GitHub kündigt für öffentliche Repositories eine Sperre dieses Triggers ab 02.12.2026 an. Wir müssen diese Schutzregel nicht außer Kraft setzen.
