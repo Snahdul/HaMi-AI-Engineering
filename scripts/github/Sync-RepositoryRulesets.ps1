@@ -42,7 +42,7 @@ function Get-Hash([string]$Value) {
     [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($Value))).ToLowerInvariant()
 }
 function Get-Desired($Policy, [string]$Repo) {
-    Assert-Keys $Policy @('schemaVersion','ruleset','repositories')
+    Assert-Keys $Policy @('schemaVersion','ruleset','repositories','requiredStatusCheckParameters')
     Assert-That ($Policy.schemaVersion -eq 1) 'UNSUPPORTED_POLICY_VERSION'
     Assert-That ($Repo -cmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') 'INVALID_REPOSITORY'
     Assert-That ($Policy.repositories -is [System.Collections.IDictionary] -and $Policy.repositories.Contains($Repo)) 'UNREGISTERED_REPOSITORY'
@@ -64,15 +64,17 @@ function Get-Desired($Policy, [string]$Repo) {
             $p.require_extra_approval_for_unattributed_changes = $profile.requireExtraApprovalForUnattributedChanges
         } else { Assert-Keys $rule @('type') }
     }
+    Assert-Keys $Policy.requiredStatusCheckParameters @('strict_required_status_checks_policy','do_not_enforce_on_create')
+    Assert-That ($Policy.requiredStatusCheckParameters.strict_required_status_checks_policy -is [bool] -and $Policy.requiredStatusCheckParameters.do_not_enforce_on_create -ceq $false) 'INVALID_STATUS_CHECK_DEFAULTS'
     $names = @()
     foreach ($check in $profile.requiredStatusChecks) {
         Assert-Keys $check @('context','integration_id')
-        Assert-That ($check.context -is [string] -and $check.context -cmatch '^[A-Za-z0-9 ._()/:-]{1,100}$' -and $check.integration_id -is [long] -and $check.integration_id -gt 0) 'INVALID_CHECK'
+        Assert-That ($check.context -is [string] -and $check.context -cmatch '^[A-Za-z0-9 ._()/:-]{1,100}$' -and ($check.integration_id -is [long] -or $check.integration_id -is [int]) -and $check.integration_id -gt 0) 'INVALID_CHECK'
         Assert-That ($names -cnotcontains $check.context) 'DUPLICATE_CHECK'
         $names += $check.context
     }
     if ($names.Count -gt 0) {
-        $desired.rules = @($desired.rules) + @(@{type='required_status_checks';parameters=@{required_status_checks=$profile.requiredStatusChecks;strict_required_status_checks_policy=$false;do_not_enforce_on_create=$false}})
+        $desired.rules = @($desired.rules) + @(@{type='required_status_checks';parameters=@{required_status_checks=$profile.requiredStatusChecks;strict_required_status_checks_policy=$Policy.requiredStatusCheckParameters.strict_required_status_checks_policy;do_not_enforce_on_create=$Policy.requiredStatusCheckParameters.do_not_enforce_on_create}})
     }
     return $desired
 }
@@ -138,7 +140,7 @@ function Get-Snapshot([string]$Repo, [scriptblock]$Request) {
     Assert-That ($legacy.status -eq 404) 'LEGACY_BRANCH_PROTECTION_PRESENT'
     $list = (& $Request 'GET' "$path/rulesets?includes_parents=true&per_page=100" $null).data
     Assert-That ($list -is [System.Collections.IList] -and $list.Count -le 1) 'OTHER_OR_AMBIGUOUS_RULESETS'
-    $effective = (& $Request 'GET' "$path/rules/branches/$encoded?per_page=100" $null).data
+    $effective = (& $Request 'GET' "$path/rules/branches/${encoded}?per_page=100" $null).data
     Assert-That ($effective -is [System.Collections.IList] -and $effective.Count -lt 100) 'UNKNOWN_EFFECTIVE_RULES'
     $current = $null
     $id = $null
@@ -176,7 +178,7 @@ function Get-Action($Current, $Desired) {
     if ($null -eq $Current) { return 'Create' }
     Assert-Keys $Current @('name','target','enforcement','bypass_actors','conditions','rules')
     foreach ($key in @('name','target','conditions','bypass_actors')) {
-        Assert-That (Equal $Current[$key] $Desired[$key]) "RULESET_SCOPE_OR_BYPASS_MISMATCH_$key"
+        Assert-That (Equal $Current[$key] $Desired[$key]) 'RULESET_SCOPE_OR_BYPASS_MISMATCH'
     }
     Assert-That (@('active','disabled','evaluate') -ccontains $Current.enforcement) 'UNKNOWN_ENFORCEMENT'
     Assert-That ($Current.rules -is [System.Collections.IList]) 'INVALID_RULE_LIST'
@@ -224,12 +226,16 @@ function New-Plan($Snapshot, $Desired, [string]$PolicyHash, [string]$ScriptHash)
 }
 
 function Invoke-Sync([string]$Operation, [string]$Repo, $Desired, [string]$PolicyHash, [string]$ScriptHash, [string]$Approval, [scriptblock]$Request) {
+    Assert-That (@('Check','Plan','Apply') -ccontains $Operation) 'INVALID_MODE'
     $snapshot = Get-Snapshot $Repo $Request
     $result = New-Plan $snapshot $Desired $PolicyHash $ScriptHash
     if ($result.plan.action -ceq 'None') {
         return @{status='Conformant';changed=$false;repository=$Repo;planHash=$result.planHash;rulesetId=$snapshot.rulesetId}
     }
-    if ($Operation -cne 'Apply') {
+    if ($Operation -ceq 'Check') {
+        return @{status='Drift';changed=$false;repository=$Repo;action=$result.plan.action;policyHash=$PolicyHash;rulesetId=$snapshot.rulesetId;message='Run Plan for the exact current and desired configuration.'}
+    }
+    if ($Operation -ceq 'Plan') {
         return @{status='Drift';changed=$false;planHash=$result.planHash;plan=$result.plan}
     }
     Assert-That ($Approval -cmatch '^[0-9a-f]{64}$' -and $Approval -ceq $result.planHash) 'APPROVED_PLAN_HASH_REQUIRED_OR_STALE'
