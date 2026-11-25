@@ -28,6 +28,27 @@ Architekturregeln, Problemursachen und Folgeaufgaben werden im Repository festge
 
 **Leitlinie:** Ein sichtbares, nutzbares Zwischenergebnis schafft Orientierung für die weitere Optimierung; notwendige Sicherheits- und Qualitätsprüfungen bleiben erhalten.
 
+## .NET-Build- und Paketstandard
+
+Für HaMi-.NET-Solutions verwenden wir die nativen MSBuild- und NuGet-Mechanismen. Die gemeinsame Konfiguration liegt im passenden Repository-/Solution-Teilbaum, nicht in einem externen, impliziten Build-Service. Projektbezogene Abweichungen müssen nachvollziehbar bleiben.
+
+| Datei | Verantwortung |
+| --- | --- |
+| `global.json` | Gewähltes .NET SDK und dessen Roll-forward-Verhalten |
+| `Directory.Build.props` | Gemeinsame Build-Eigenschaften und Qualitätsvorgaben, z. B. TargetFramework, Nullable, ImplicitUsings, TreatWarningsAsErrors, soweit identisch |
+| `Directory.Packages.props` | NuGet Central Package Management (CPM), eine geprüfte Version je Paket und zentralem Geltungsbereich |
+| `*.csproj` | Projektspezifischer OutputType, tatsächliche PackageReference ohne lokale Version, ProjectReference, Ressourcen und begründete projektspezifische Eigenschaften |
+| `.editorconfig` | Formatierungs- und Analyseregeln |
+| `Directory.Build.targets` | Gemeinsame Build-Targets nur bei konkretem Bedarf; keine Infrastruktur auf Vorrat |
+
+CPM wird mit `ManagePackageVersionsCentrally=true` und `PackageVersion` aktiviert. Die zentrale Versionstabelle ist keine Liste globaler Paketabhängigkeiten. Jedes Projekt referenziert nur die benötigten Pakete. Transitive Pinning oder VersionOverride nicht pauschal aktivieren; begründete native Sicherheits-Pins und andere Versionseinschränkungen einschließlich exakter Versionsbereiche erhalten. Bei mehreren Target Frameworks bzw. getrennten Build-Kontexten sind begründete Bedingungen und Ausnahmen zulässig.
+
+Bei einer Migration bestehender Solutions zunächst die tatsächlichen Projekte, Imports, direkten und aufgelösten transitiven Abhängigkeiten sowie die SDK-/Build-Einstellungen erfassen. Reines Zentralisierungs-Refactoring versionserhaltend durchführen; Paketupdates, zusätzliche Referenzen, geänderte Qualitätsgates oder SDK-Wechsel sind eigene Entscheidungen. Vorher/nachher Restore-Graph, relevante Builds und Tests vergleichen. MSBuild und NuGet suchen ihre jeweiligen Props-Dateien vom Projektverzeichnis aufwärts; näher gelegene Dateien können die zentrale Konfiguration begrenzen. Isolierte Sandbox-/Replay-Samples oder historische Referenzprojekte behalten die selbstständige Buildfähigkeit; notwendige Props müssen Teil des geprüften Build-Kontexts sein oder die benötigten Eigenschaften und Versionen bleiben ausdrücklich lokal. Keine stillschweigende Abhängigkeit von Dateien außerhalb des kopierten Kontexts.
+
+Einführung im jeweiligen Projekt erfolgt als nachvollziehbarer Issue-/PR-Auftrag; keine pauschale Migration aller bestehenden Repositories. Erste Referenz: [HaMi AI Engineering Agent, Issue #70](https://github.com/Snahdul/HaMi-AI-Engineering-Agent/issues/70), [Commit 451a6f51](https://github.com/Snahdul/HaMi-AI-Engineering-Agent/commit/451a6f51d063a938e0b5d1ec547df0f3e21e4df6) im Draft-PR #71; technische Abnahme noch ausstehend. Die Standardentscheidung ist vom Projektinhaber am 25.11.2026 bestätigt, ihre Veröffentlichung bleibt der PR-Freigabe vorbehalten.
+
+Referenzen: [MSBuild: Customize the build by folder](https://learn.microsoft.com/en-us/visualstudio/msbuild/customize-by-directory), [NuGet: Central Package Management](https://learn.microsoft.com/nuget/consume-packages/Central-Package-Management).
+
 ## Öffentliches Workflow-Beispiel: Dokumentations-PR #9
 
 Die ausführliche [Fallstudie zur Entstehung von HaMi AI Engineering](../case-studies/hami-ai-engineering.md) verbindet diesen PR mit den nachfolgenden Issues, Sicherheitsprüfungen und dokumentierten Korrekturen.
